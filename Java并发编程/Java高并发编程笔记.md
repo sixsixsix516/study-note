@@ -187,7 +187,6 @@ JMH使用`@BeanchmarkMode`这个注解来声明使用哪些模式(Model.All全�
 
    将fork设置为1,代表每一次运行基准测试时都会开辟一个全新的JVM进程对齐进行测试, 多个基准测试之间则不再受干扰
 
-   
 
 ```java
     public static void main(String[] args) throws RunnerException {
@@ -272,7 +271,7 @@ public static void main(String[] args) throws RunnerException {
 
 > 原子类型是无锁的,线程安全的
 
-基准性能测试
+###### 基准性能测试
 
 ```java
 
@@ -367,4 +366,296 @@ public class SynchronizedVSLockVsAtomicInteger {
 }
 
 ```
+###### 基本用法
+
+1. 创建 
+
+```java
+public static void main(String[] args) {
+	/// ============================ 创建 ================================
+	// 初始值为0
+	AtomicInteger atomicInteger = new AtomicInteger();
+	// 指定初始值
+	AtomicInteger atomicInteger1 = new AtomicInteger(10);
+	/// ============================ 增加操作 ================================
+	// 返回当前值, 然后自增
+	int value = atomicInteger.getAndIncrement();
+	// 先自增然后返回值
+	int value2 = atomicInteger.incrementAndGet();
+	// 返回当前值, 然后增加指定值
+	int andAdd = atomicInteger.getAndAdd(5);
+	//  atomicInteger.addAndGet()
+	// 设置一个值
+	atomicInteger.set(10);
+	/// ============================ 减少操作 ================================
+	// 返回当前值, 然后进行自减
+	int value3 = atomicInteger.getAndDecrement();
+	// 自减后 返回当前值
+	int value4 = atomicInteger.decrementAndGet();
+	/// ============================ 更新操作 ================================
+	// expect为当前的值, update为更新后的值
+	boolean b = atomicInteger.compareAndSet(0, 10);
+	/// ============================ 函数式 ================================
+	// 使用函数式
+	int i1 = atomicInteger.updateAndGet((i) -> i + 100);
+	// atomicInteger1.getAndUpdate()
+	int i = atomicInteger.accumulateAndGet(20, Integer::sum);
+	//atomicInteger.getAndAccumulate()
+}
+```
+
+###### AtomicInteger原理
+
+```java
+// 源码
+
+// Unsafe是由C++实现的, 内部存在大量汇编CPU指令等代码, JDK实现的lock free几乎完全依赖该类
+private static final Unsafe unsafe = Unsafe.getUnsafe();
+// 存放value内存地址偏移量
+private static final long valueOffset;
+static {
+    try {
+        valueOffset = unsafe.objectFieldOffset
+            (AtomicInteger.class.getDeclaredField("value"));
+    } catch (Exception ex) { throw new Error(ex); }
+}
+// 具体值
+private volatile int value;
+```
+
+###### compareAndSwapInt源码分析 - 	CAS算法
+
+CAS包含3个操作数: 内存值V, 旧的预期值A, 要修改的新值B. 当且仅当预期值A与内存值V相等时,将内存值V修改为B,否则什么都不需要做
+
+compareAndSwapInt方法是一个native方法, 提供了CAS算法的实现, AtomicInteger类中的原子性方法几乎都借助该方法实现
+
+
+
+**疑问** 既然可以直接获取当前值, 那为什么还存在当前值与期待值不一致情况
+
+```java
+AtomicInteger atomicInteger2 = new AtomicInteger(2);
+atomicInteger2.compareAndSet(atomicInteger2.get(), 10);
+```
+
+**原因** 是相对于synchronized关键字, 显示锁lock, AtomicInteger所提供的方法不具备排他性, 当线程A通过get() 方法获取了AtomicInteger 的 value后, B线程对value的修改意见顺序完成, A线程试图再次修饰的时候就会出现exceptValue与value当前值不相等情况, 这种方法也被称为乐观锁. 对数据进行修改的时候, 首先需要进行比较
+
+
+
+###### 自旋方法 addAndGet 
+
+由于compareAndSwapInt乐观锁的特性 , 会存在数据修改失败的情况, 但是有些时候必须保证数据的更新是成功的,比如调用 incrementAndGet, addAndGet
+
+```java
+
+// value 需要加的值
+public final int getAndAddInt(Object atomicInteger, long valueOffset, int value) {
+    int nowValue;
+    do {
+        // 首先获取到当前的值
+        nowValue = this.getIntVolatile(atomicInteger, valueOffset);
+    } 
+	// 不断尝试修改, 只有当前的值等于内存中的值时 才修改成功    
+    while(!this.compareAndSwapInt(atomicInteger, valueOffset, nowValue, nowValue + value));
+    
+    // 返回修改后的值
+    return nowValue;
+}
+```
+
+![getAndAddInt方法流程图](..\img\getAndSet方法流程图.png)
+
+
+
+##### AtomicBoolean
+
+提供原子性的读写布尔类型变量的解决方案
+
+内部使用int存储, true是1 false是0
+
+```java
+public static void main(String[] args) {
+	// 创建(默认false)
+	AtomicBoolean atomicBoolean = new AtomicBoolean();
+	// 指定值
+	AtomicBoolean atomicBoolean1 = new AtomicBoolean(true);
+	// 其他方式与AtomicInteger类似
+}
+```
+
+**一个可立即返回并且推出阻塞的显示锁lock**
+
+```java
+package com.sixsixsix516;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/**
+ * 一个可立即返回并且推出阻塞的显示锁lock
+ *
+ * @author sun 2020/9/14 13:11
+ */
+public class TryLock {
+
+	private AtomicBoolean atomicBoolean = new AtomicBoolean(false);
+
+	private final ThreadLocal<Boolean> threadLocal = ThreadLocal.withInitial(() -> false);
+
+	private boolean tryLock() {
+		boolean result = atomicBoolean.compareAndSet(false, true);
+		if (result) {
+			threadLocal.set(true);
+		}
+		return result;
+	}
+
+	/**
+	 * 锁的释放
+	 */
+	private boolean release() {
+		if (threadLocal.get()) {
+			threadLocal.set(false);
+			return atomicBoolean.compareAndSet(true, false);
+		}
+		return false;
+	}
+
+
+	private final static Object VAL_OBJ = new Object();
+
+	public static void main(String[] args) {
+		TryLock lock = new TryLock();
+		List<Object> validation = new ArrayList<>();
+		for (int i = 0; i < 10; i++) {
+			new Thread(() -> {
+				while (true) {
+					try {
+						if (lock.tryLock()) {
+							System.out.println(Thread.currentThread().getName() + ": get lock");
+							if (validation.size() > 1) {
+								throw new IllegalStateException("validation failed");
+							}
+							validation.add(VAL_OBJ);
+							TimeUnit.MILLISECONDS.sleep(ThreadLocalRandom.current().nextInt(10));
+						} else {
+							TimeUnit.MILLISECONDS.sleep(ThreadLocalRandom.current().nextInt(10));
+						}
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					} finally {
+						if (lock.release()) {
+							System.out.println(Thread.currentThread().getName() + ": release the lock");
+							validation.remove(VAL_OBJ);
+						}
+					}
+				}
+			}).start();
+		}
+	}
+}
+```
+
+
+
+##### AtomicReference
+
+对象的引用是一个4字节的数字, 代表着在JVM堆内存中的引用地址, 对一个4字节数字的读取操作和写入操作本身就是原子性的
+
+
+
+- volatile 关键字保证了线程间的可见性,当某线程操作了被volatile关键字修饰的变量,其他线程可以立即看到该共享变量的变化
+- CAS算法, 对比交换算法, 由UnSafe提供, 实质上是通过CPU指令来得到保证的, CAS算法提供了一种快速失败的方法,当某线程修改已经被改变数据时会快速失败
+- 当CAS算法对共享数据操作失败时,因为有自旋算法的加持,我们对共享数据的更新终究会得到计算
+
+原子类型用自旋+CAS的无锁操作保证了共享变量的线程安全性和原子性
+
+
+
+##### AtomicStampedReference 
+
+在AtomicReference的基础上通过增加版本号解决了ABA问题
+
+
+
+##### Atomic数组
+
+1. AtomicIntegerArray
+2. AtomicLongArray
+3. AtomicReferenceArray
+
+
+
+##### AtomicFieldUpdater
+
+原子性更新对象属性
+
+> 1.  **未被volatile**关键字修饰的属性无法被原子性的更新
+> 2. 类变量无法被原子性的更新
+> 3. 无法直接访问到的变量不能被原子性的更新
+> 4.  final修饰的无法被原子性更新
+> 5.  父类成员无法被原子性更新
+
+只有是自己的被volatile修饰且public 不被final修饰的变量
+
+
+
+-  AtomicIntegerFieldUpdater：原子性地更新对象的int类型属性，该属性无须被声明成AtomicInteger。
+- AtomicLongFieldUpdater：原子性地更新对象的long类型属性，该属性无须被声明成AtomicLong。
+- AtomicReferenceFieldUpdater：原子性地更新对象的引用类型属性，该属性无须被声明成AtomicReference<T>。
+
+```java
+public class AtomicIntegerFieldUpdaterTest {
+
+	public static class User {
+		volatile int age;
+		public int getAge() {
+			return age;
+		}
+	}
+
+	public static void main(String[] args) {
+		AtomicIntegerFieldUpdater<User> objectAtomicIntegerFieldUpdater = AtomicIntegerFieldUpdater.newUpdater(User.class, "age");
+		User user = new User();
+		objectAtomicIntegerFieldUpdater.addAndGet(user, 20);
+		System.out.println(user.getAge());
+	}
+}
+```
+
+
+
+##### sun.misc.Unsafe
+
+Unsafe可以直接操作内存, 甚至可以通过汇编指令直接进行CPU操作
+
+```java
+// 获取unsafe
+Field f = Unsafe.class.getDeclaredField("theUnsafe");
+f.setAccessible(true);
+Unsafe unsafe = (Unsafe) f.get(null);
+System.out.println(unsafe);
+```
+
+1. 绕过构造函数实例化对象
+
+   ```java
+   Object o = unsafe.allocateInstance(User.class);
+   ```
+
+2. 直接修改内存数据
+
+   ```java
+   User user = (User) unsafe.allocateInstance(User.class);
+   unsafe.putInt(user, unsafe.objectFieldOffset(user.getClass().getDeclaredField("age")), 30);
+   
+   System.out.println(user);
+   ```
+
+   
+
+
 
