@@ -1,4 +1,4 @@
-package com.sixsixsix516;
+package com.sixsixsix516.concurrent;
 
 import java.lang.reflect.Array;
 import java.util.ArrayList;

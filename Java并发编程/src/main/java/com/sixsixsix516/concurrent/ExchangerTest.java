@@ -1,4 +1,4 @@
-package com.sixsixsix516;
+package com.sixsixsix516.concurrent;
 
 import java.util.concurrent.Exchanger;
 import java.util.concurrent.ThreadLocalRandom;

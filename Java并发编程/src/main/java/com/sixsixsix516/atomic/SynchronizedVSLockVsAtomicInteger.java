@@ -1,4 +1,4 @@
-package com.sixsixsix516;
+package com.sixsixsix516.atomic;
 
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.profile.StackProfiler;

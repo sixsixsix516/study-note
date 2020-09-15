@@ -1,4 +1,4 @@
-package com.sixsixsix516;
+package com.sixsixsix516.atomic;
 
 import java.util.ArrayList;
 import java.util.List;
