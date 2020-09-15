@@ -655,7 +655,330 @@ System.out.println(unsafe);
    System.out.println(user);
    ```
 
-   
 
 
+
+### 并发工具类
+
+##### CountDownLatch
+
+当某项工作需要由若干项子任务并行的完成,并且只有在所有的子任务结束之后,当前主任务才能进行下一阶段
+
+CountDownLatch直译为倒计数门阀, 它的作用是指有一个门阀在等待着倒计数,直到计数器为0的时候才能打开, 可以设置等待打开的时候指定超时时间
+
+如果想要提高接口调用的响应速度可以将串行化的任务并行化处理
+
+```java
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
+/**
+ * @author sun 2020/9/15 10:07
+ */
+public class CountDownLatchTest2 {
+
+	public static void main(String[] args) throws InterruptedException {
+		// 1.获得商品列表
+		List<Product> productList = IntStream.rangeClosed(1, 10).mapToObj(Product::new).collect(Collectors.toList());
+		// 2.分别进行计算
+		CountDownLatch countDownLatch = new CountDownLatch(productList.size());
+		productList.forEach(product ->
+				new Thread(() -> {
+					try {
+						// 模拟真正的业务操作
+						TimeUnit.MILLISECONDS.sleep(100);
+						product.setPrice(System.currentTimeMillis());
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					} finally {
+						// 任务完成,计数器减1
+						countDownLatch.countDown();
+					}
+				}).start()
+		);
+		// 3.返回结果
+		// 主线程等待 直至任务全部完成
+		countDownLatch.await();
+		System.out.println(productList);
+	}
+
+
+	static class Product {
+		private int id;
+		private double price;
+
+		Product(int id) {
+			this.id = id;
+		}
+
+		public int getId() {
+			return id;
+		}
+
+		public void setId(int id) {
+			this.id = id;
+		}
+
+		public double getPrice() {
+			return price;
+		}
+
+		void setPrice(double price) {
+			this.price = price;
+		}
+
+		@Override
+		public String toString() {
+			return "Product{" +
+					"id=" + id +
+					", price=" + price +
+					'}';
+		}
+	}
+}
+```
+
+其他方法
+
+```java
+// 指定超时时间的等待
+countDownLatch.await(10,TimeUnit.SECONDS);
+// 返回当前计数器的值
+long count = countDownLatch.getCount();
+```
+
+
+
+##### Cyclic Barrier(循环屏障)
+
+允许多个线程在执行完相应的操作之后彼此等待共同到达一个障点(barrier point). CyclicBarrier也非常适合用于某个串行化任务被拆分为若干个并行执行的子任务, 它的功能比CountDownLatch多, 它可以被重复使用, 而CountDownLatch当计数器为0时将无法再使用
+
+适合多次使用,多个任务同时到达一个点
+
+示例
+
+```java
+
+import java.util.concurrent.BrokenBarrierException;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * @author sun 2020/9/15 12:58
+ */
+public class CyclicBarrierTest2 {
+
+	public static void main(String[] args) throws BrokenBarrierException, InterruptedException {
+		CyclicBarrier barrier = new CyclicBarrier(11);
+		for (int i = 0; i < 10; i++) {
+			new Thread(new Tourist(i, barrier)).start();
+		}
+		barrier.await();
+		System.out.println("乘客全部上车了");
+		barrier.await();
+		System.out.println("乘客全部下车了");
+	}
+
+
+	private static class Tourist implements Runnable {
+
+		private final int touristId;
+		private final CyclicBarrier cyclicBarrier;
+
+		public Tourist(int touristId, CyclicBarrier cyclicBarrier) {
+			this.touristId = touristId;
+			this.cyclicBarrier = cyclicBarrier;
+		}
+
+		@Override
+		public void run() {
+			System.out.println("乘客" + touristId + "上车");
+			// 模拟乘客上车时间开销
+			spendSeveralSeconds();
+			// 上车后等待其他同伴上车
+			waitAndPrint("乘客" + touristId + "	等待其他人上车");
+			// 模拟乘客下车的时间开销
+			spendSeveralSeconds();
+			// 下车后等待其他同伴下车
+			waitAndPrint("乘客" + touristId + " 等待其他人下车");
+
+		}
+
+		private void waitAndPrint(String message) {
+			System.out.println(message);
+			try {
+				cyclicBarrier.await();
+			} catch (InterruptedException | BrokenBarrierException e) {
+				e.printStackTrace();
+			}
+		}
+
+		private void spendSeveralSeconds() {
+			try {				TimeUnit.SECONDS.sleep(ThreadLocalRandom.current().nextInt(10));
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		}
+	}
+}
+```
+
+
+
+其他方法
+
+```java
+// 指定切片数量创建对象
+CyclicBarrier cyclicBarrier1 = new CyclicBarrier(1);
+// 带runnable的参数
+CyclicBarrier cyclicBarrier2 = new CyclicBarrier(1, () -> {
+	System.out.println("任务全部执行结束了 , 我被调用了....");
+});
+// 返回数量 , 一经创建无法修改
+int parties = cyclicBarrier2.getParties();
+// 调用后进入阻塞状态,等待其他线程执行完await方法后进入barrier point, 进而全部退出阻塞状态,当内部的count为0时,调用await()方法将直接返回,不再阻塞
+cyclicBarrier2.await();
+```
+
+
+
+##### Exchanger(交换器)
+
+exchanger简化了两个线程的数据交互,并且提供了两个线程之间的数据交换,Exchanger等待两个线程调用其exchanger方法,调用此方法时,交换机会交换两个线程提供给对方的数据
+
+使用示例
+
+```java
+public class ExchangerTest {
+
+	public static void main(String[] args) {
+		// 要交换的数据是String
+		Exchanger<String> exchanger = new Exchanger<>();
+		new Thread(() -> {
+			System.out.println("A线程启动");
+			// 模拟业务的执行
+			randomSleep();
+			try {
+				String receiveData = exchanger.exchange("我是A线程");
+				System.out.println("A线程收到数据: " + receiveData);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		}, "A").start();
+		new Thread(() -> {
+			System.out.println("B线程启动");
+			// 模拟业务的执行
+			randomSleep();
+			try {
+				String receiveData = exchanger.exchange("我是B线程");
+				System.out.println("B线程启动收到数据: " + receiveData);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		}, "B").start();
+	}
+	private static void randomSleep() {
+		try {
+			TimeUnit.SECONDS.sleep(ThreadLocalRandom.current().nextInt(10));
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+	}
+}
+```
+
+`exchange`方法是一个阻塞方法,当两个线程都调用了才会停止阻塞,执行下去
+
+其他方法
+
+```java
+// 数据交换方法，该方法的作用是将数据x交换至搭档线程，执行该方法后，当前线程会进入阻塞状态，只有当搭档线程也执行了exchange方法之后，该当前线程才会退出阻塞状态进行下一步的工作，与此同时，该方法的返回值代表着搭档线程所传递过来的交换数据。,
+exchanger.exchange("A");
+// 数据交换方法 增加超时功能,超时了则返回null
+exchanger.exchange("A",10,TimeUnit.SECONDS);
+```
+
+Exchanger在类似于生产者-消费者的情况下可能会非常有用。在生产者-消费者问题中，拥有一个公共的数据缓冲区（队列）、一个或多个数据生产者和一个或多个数据消费者。由于交换器类只涉及两个线程，因此如果你想要在两个线程之间同步数据或者交换数据，那么这种情况就可以使用Exchanger这个工具，当然在使用它的时候请务必做好线程的管理工作，否则将会出现线程阻塞，程序无法继续执行的假死情况。 
+
+
+
+##### Semaphore 信号量
+
+用于同一时刻允许多个线程对共享资源进行并行操作的场景
+
+示例
+
+```java
+
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
+
+/**
+ * @author sun 2020/9/15 15:04
+ */
+public class SemaphoreTest {
+
+	public static void main(String[] args) {
+		// 最大允许同时在线人数
+		final int MAX_PERSON_LOGIN_COUNT = 10;
+		LoginService loginService = new LoginService(MAX_PERSON_LOGIN_COUNT);
+
+		IntStream.rangeClosed(0, 200).forEach(i ->
+			new Thread(() -> {
+				boolean login = loginService.login();
+				if (!login) {
+					System.out.println("登录失败,超过最大同时登录人数");
+					return;
+				}
+				try {
+					// 模拟业务操作
+					try {
+						TimeUnit.MILLISECONDS.sleep(1);
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
+				} finally {
+					loginService.logout();
+				}
+			}, "User-" + i).start()
+		);
+	}
+
+
+	private static class LoginService {
+		private final Semaphore semaphore;
+
+		LoginService(int maxPersonLoginCount) {
+			this.semaphore = new Semaphore(maxPersonLoginCount);
+		}
+		boolean login() {
+			// 获取许可证
+			boolean login = semaphore.tryAcquire();
+			if (login) {
+				System.out.println(Thread.currentThread().getName() + "登录成功");
+			}
+			return login;
+		}
+
+		public void logout() {
+			// 释放许可证
+			semaphore.release();
+			System.out.println(Thread.currentThread().getName() + "退出登录");
+		}
+	}
+}
+```
+
+其他方法
+
+- boolean isFair()：对Semaphore许可证的争抢采用公平还是非公平的方式，对应到内部的实现类为FairSync（公平）和NonfairSync（非公平）。
+- int availablePermits()：当前的Semaphore还有多少个可用的许可证。
+- int drainPermits()：排干Semaphore的所有许可证，以后的线程将无法获取到许可证，已经获取到许可证的线程将不受影响。▪ 
+- boolean hasQueuedThreads()：当前是否有线程由于要获取Semaphore许可证而进入阻塞？（该值为预估值。）▪ 
+- int getQueueLength()：如果有线程由于获取Semaphore许可证而进入阻塞，那么它们的个数是多少呢？（该值为预估值）
 
