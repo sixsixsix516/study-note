@@ -984,7 +984,9 @@ public class SemaphoreTest {
 
 
 
-##### Phaser 
+##### Phaser 阶段器
+
+用于解决控制多个线程分阶段共同完成任务的情景问题
 
 使用实例
 
@@ -1032,4 +1034,278 @@ public class PhaserTest {
 ```
 
 
+
+其他方法
+
+1. register方法
+
+   为Phaser新增一个未到达的分片,并且返回Phase(阶段)的编号,该编号与Phaser当前的Phase编号数字一样, 但是调用该方法时,有些时候回陷入阻塞之中,比如前一个Phase阶段在执行onAdvance方法时耗时较长,那么此时若有一个新的分片想要通过register方法加入到phaser中就会陷入阻塞
+
+2. bulkRegister方法
+
+   允许注册0个与多个分片(Parties)到Phaser. 
+
+3. arrive和arriveAndAwaitAdvance
+
+   都是到达Phaser的下一个Phase阶段,前者不会等待其他分片(part),后者则会等待所有未到达的分片到达
+
+   区别
+
+   	-	arrive方法返回的阶段编号为当前的阶段编号
+   	-	arriveAndAwaitAdvance 返回下一个阶段编号
+
+4. arriveAndDeregister方法
+
+   到达下一个阶段后将当前Phaser的分区partie数量减少一个. 该方法返回当前阶段的编号,如为负则当前phaser已被销毁
+
+5. awaitAdvance(int phase)
+
+   等待与Phaser关联的分片都到达某个指定的Phase编号,如果某个分片任务未到达,那么该方法会进入阻塞状态,这有点类似于CountDownLatch的await方法,该方法无法被中断
+
+6. awaitAdvanceInterruptibly(int phase)
+
+   与awaitAdvance一致,但增加了可中断功能
+
+7. awaitAdvanceInterruptibly(int phase, long timeout, TimeUnit unit)
+
+   在 awaitAdvanceInterruptibly(int phase) 基础上增加了超时功能
+
+   ​	
+##### Lock
+
+> Lock接口是对锁操作方法的一个基本定义，它提供了synchronized关键字所具备的全部功能方法，另外我们可以借助于Lock创建不同的Condition对象进行多线程间的通信操作，与关键字synchronized进行方法同步代码块同步的方式不同，
+
+主要方法
+
+1. lock() 尝试获取锁，如果此刻该锁未被其他线程持有，则会立即返回，并且设置锁的hold计数为1；如果当前线程已经持有该锁则会再次尝试申请，hold计数将会增加一个，并且立即返回；如果该锁当前被另外一个线程持有，那么当前线程会进入阻塞，直到获取该锁，由于调用lock方法而进入阻塞状态的线程同样不会被中断，这一点与进入synchronized同步方法或者代码块被阻塞类似。
+
+2. lockInterruptibly()
+
+   该方法与前者类似, 但可中断
+
+3. tryLock()
+
+   不会阻塞获取锁,如果失败则直接返回false
+
+4. unlock()
+
+   释放锁
+
+5. newCondition
+
+   创建一个与该lock相关联的Condition对象
+
+**ReentrantLock**
+
+重入(多次获取)锁
+
+1. getHoldCount 
+
+   查询当前线程在某个Lock上的数量,如果当前线程成功获得了lock,则该值大于等于1,否则0
+
+2. isHeldByCurrentThread
+
+   判断当前线程是否持有某个Lock，由于Lock的排他性，因此在某个时刻只有一个线程调用该方法返回true
+
+3. isLocked
+
+   判断Lock是否已经被线程持有
+
+4. isFair
+
+   创建的ReentrantLock是否为公平锁
+
+5. hasQueuedThreads()方法：在多个线程试图获取Lock的时候，只有一个线程能够正常获得，其他线程可能（如果使用tryLock()方法失败则不会进入阻塞）会进入阻塞，该方法的作用就是查询是否有线程正在等待获取锁。
+
+6. hasQueuedThread(Thread thread)方法：在等待获取锁的线程中是否包含某个指定的线程。
+
+7. getQueueLength()方法：返回当前有多少个线程正在等待获取锁。
+
+
+
+**正确使用Lock**
+
+- 确保锁的释放
+
+  ```java
+  public static void main(String[] args) {
+  	Lock lock = new ReentrantLock();
+  	// 获取锁
+  	lock.lock();
+  	try {
+  		// 执行业务逻辑
+  	} finally {
+  		lock.unlock();
+  	}
+  }
+  ```
+
+- 避免锁的交叉引起死锁
+
+- 多个原子性方法的组合不能确保原子性
+
+
+
+##### ReentrantReadWriteLock
+
+第共享资源的操作一般分为两种类型 读和写, 多个线程的读并不会存在线程安全问题,所以多线程读之间不应该互斥
+
+读写锁: 允许某个特定时刻多线程并发读取共享资源,提高系统性能和访问吞吐量
+
+读锁之间不互斥,不同锁与写锁之间互斥
+
+```java
+import java.util.LinkedList;
+import java.util.List;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+/**
+ * @author sun 2020/9/16 16:50
+ */
+public class ReentrantReadWriteLockTest {
+
+	/**
+	 * 定义读写锁
+	 */
+	private final ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
+	/**
+	 * 创建读锁
+	 */
+	private final Lock readLock = readWriteLock.readLock();
+	/**
+	 * 创建写锁
+	 */
+	private final Lock writeLock = readWriteLock.writeLock();
+
+	private final List<String> list = new LinkedList<>();
+
+	/**
+	 * 使用写锁进行数据同步
+	 */
+	public void add(String element) {
+		writeLock.lock();
+		try {
+			list.add(element);
+		} finally {
+			writeLock.unlock();
+		}
+	}
+	/**
+	 * 使用读写进行数据同步
+	 */
+	public String take(int index) {
+		readLock.lock();
+		try {
+			return list.get(index);
+		} finally {
+			readLock.unlock();
+		}
+	}
+}
+```
+
+
+
+##### Condition
+
+```java
+
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
+import static java.util.concurrent.ThreadLocalRandom.current;
+
+/**
+ * @author sun 2020/9/16 17:48
+ */
+public class ConditionTest {
+
+	/**
+	 * 共享数据
+	 */
+	private static int shareData = 0;
+	/**
+	 * 标识共享数据是否被使用
+	 */
+	private static boolean dataUsed = false;
+
+	/**
+	 * 创建显示锁
+	 */
+	private static Lock lock = new ReentrantLock();
+
+	/**
+	 * 使用显示锁创建Condition
+	 */
+	private static Condition condition = lock.newCondition();
+
+
+	/**
+	 * 对数据的写操作
+	 */
+	private static void change() {
+		// 获取锁，如果当前锁被其他线程持有，则当前线程会进入阻塞
+		lock.lock();
+		try {
+			// ②如果当前数据未被使用，则当前线程将进入wait队列，并且释放lock
+			while (!dataUsed) {
+				condition.await();
+			}
+			// 修改数据，并且将dataUsed状态标识为false
+			TimeUnit.SECONDS.sleep(current().nextInt(5));
+			shareData++;
+			dataUsed = false;
+			System.out.println("produce the new value: " + shareData);
+			// ③ 通知并唤醒在wait队列中的其他线程——数据使用线程
+			condition.signal();
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		} finally {
+			// 释放锁
+			lock.unlock();
+		}
+	}
+
+	// 对数据进行使用
+	private static void use() {
+		// 获取锁，如果当前锁被其他线程持有，则当前线程会进入阻塞
+		lock.lock();
+		try {
+			// ④ 如果当前数据已经使用，则当前线程将进入wait队列，并且释放lock
+			while (dataUsed) {
+				condition.await();
+			}
+			// 使用数据，并且将dataUsed状态标识置为true
+			TimeUnit.SECONDS.sleep(current().nextInt(5));
+			dataUsed = true;
+			System.out.println("the shared data changed: " + shareData);
+			// ⑤通知并唤醒wait队列中的其他线程——数据修改线程
+			condition.signal();
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		} finally {
+			// 释放锁
+			lock.unlock();
+		}
+	}
+
+	public static void main(String[] args) {
+		// 创建并启动两个匿名线程
+		new Thread(() -> {
+			while (true){
+				change();
+			}
+		}, "Producer").start();
+		new Thread(() -> {
+			while (true){
+				use();
+			}
+		}, "Consumer").start();
+	}
+}
+```
 
