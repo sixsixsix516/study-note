@@ -1309,3 +1309,323 @@ public class ConditionTest {
 }
 ```
 
+
+
+##### StampedLock
+
+> 饥饿写问题: 读线程数量远远大于写线程的数量,导致长时间锁被读线程占有, 写线程无法获得对数据的操作权限从而进入饥饿状态(可以在构造器构造读写锁时指定为公平锁,读写线程获得执行权限得到的机会相对公平,但是当读线程大于写线程时,性能效率会比较低下),所以在使用读写锁的时候要评估好线程的数量
+
+StampedLock 由一个Long型的数据戳(stamp)和三种模型构成, 当获取锁(比如调用readLock(),writeLock())时会返回一个long型的时间戳(stamp), 该数据戳将被用于进行稍后的锁释放参数,如果返回0(比如调用tryWriteLock), 则表示锁获取失败, **StampLock是不可重入的**, 
+
+StampedLock的引入并不是要横扫锁的世界成为“武林至尊”，它更多地是提供了一种乐观读的方式供我们选择，同时又解决了读写锁中“饥饿写”的问题。作为开发人员要能够根据应用程序的特点来判断应该采用怎样的锁进行贡献资源数据的同步，以确保数据的一致性，如果你无法明确地了解读写线程的分布情况，那么请使用ReentrantLock，因为通过本节所做的基准测试不难发现，它的表现始终非常稳定，无论是读线程还是写线程。如果你的应用程序中，读操作远远多于写操作，那么为了提高数据读取的并发量，StampedLock的乐观读将是一个不错的选择，同时它又不会引起饥饿写的问题。
+
+
+
+### 并发容器
+
+##### 链表
+
+链表是线性表的链式存储方式,链表不是连续的内存存储结构
+
+在链表的每一个节点中,至少包含着两个基本属性: 数据本身与指向下一个节点的引用或指针
+
+
+
+##### BlockingQueue 阻塞队列
+
+当队列已满时(队列元素数量达到了最大容量的临界值),对队列的写入操作将会被阻塞挂起
+
+当队列为空时(队列元素到达了0的临界值) 对队列的读操作线程将被阻塞挂起
+
+BlockingQueue的内部实现主要依赖于显示锁lock及与其关联的Condition对象,所以这些实现类都是线程安全的,可以直接使用
+
+
+
+##### ArrayBlockingQueue
+
+基于数组结构实现的FIFO(先进先出)阻塞队列,在构造该阻塞队列时需要指定队列中最大元素的数量
+
+```java
+public static void main(String[] args) throws InterruptedException {
+	ArrayBlockingQueue<Integer> arrayBlockingQueue = new ArrayBlockingQueue<>(2);
+	///=== 阻塞 写 ====== 
+	// 向队列尾部加入元素,如果满了则阻塞,知道有其他线程进行消费或对其进行中断
+	arrayBlockingQueue.put(1);
+	// 向尾部添加元素,如果容器已满,则在指定时间内阻塞,时间到后返回false代表元素加入失败
+	boolean offer = arrayBlockingQueue.offer(2, 10, TimeUnit.SECONDS);
+	///=== 非阻塞 写 === 
+	// 向尾部添加一个数据, 当容器满时抛出异常
+	arrayBlockingQueue.add(1);
+	// 向尾部添加一个数据, 当容器满时立即返回false
+	arrayBlockingQueue.offer(1);
+	///=== 阻塞 读 ===== 
+	// 从头部获取数据并移除,当容器空时阻塞,知道其他线程添加数据,或被中断
+	Integer take = arrayBlockingQueue.take();
+	// 从头部获取数据并移除,当容器为空时 指定时间内 如果还是获取不到则返回null
+	arrayBlockingQueue.poll(1, TimeUnit.MILLISECONDS);
+	////=== 非阻塞 读 ==== 
+	// 从头部获取数据并移除,当容器为空时 返回null
+	Integer poll = arrayBlockingQueue.poll();
+	// 从头部获取数据,如果容器为空则返回null
+	Integer peek = arrayBlockingQueue.peek();
+}
+```
+
+
+
+##### PriorityBlockingQueue 优先级阻塞队列
+
+是一个无边界的阻塞队列,该队列会根据某种规则对插入队列尾部的元素进行排序
+
+特点
+
+- 理论上 PriorityBlockingQueue存放数据的数量是无边界的, 内部维护了一个Object的数组,随着数据的增加会动态扩容
+
+```java
+public static void main(String[] args) {
+	// 指定初始容量,空构造器的默认初始容量是11,泛型必须是Comparable接口子类,否则抛出类型转换异常
+	PriorityBlockingQueue<Integer> priorityBlockingQueue = new PriorityBlockingQueue(10);
+	// 不存在阻塞写方法,因为priorityBlockingQueue是无边界的,添加方法都会自动排序一遍
+	// add, offer, put
+	// 不存在阻塞读方法 无边界
+}
+```
+
+
+
+##### LinkedBlockingQueue 
+
+可选边界基于链表实现的FIFO队列
+
+```java
+public static void main(String[] args) {
+	// 默认无参构造器是无边界
+	// 指定边界的方式创建
+	LinkedBlockingQueue<Integer> integerLinkedBlockingQueue = new LinkedBlockingQueue<>(10);
+	// 其他方法与ArrayBlokcingQueue类似
+}
+```
+
+
+
+##### DelayQueue
+
+无边界阻塞队列, 容器内的元素会被延迟单位后消费, 元素按照过期时间排序, 快要过期的元素在前面
+容器内的元素类型必须实现Delayed接口的子类 需要重写getDelay方法用于计算距离过期时间
+
+```java
+
+import java.util.concurrent.Delayed;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * @author sun 2020/9/17 16:28
+ */
+public class MessageDelay implements Delayed {
+
+	/**
+	 * 元素数据的内容
+	 */
+	private final String message;
+
+	/**
+	 * 用于计算失效的时间(单位秒)
+	 */
+	private final long time;
+
+	public MessageDelay(String message, long second) {
+		this.message = message;
+		this.time = second + System.currentTimeMillis() / 1000;
+		System.out.println(time);
+	}
+
+	@Override
+	public long getDelay(TimeUnit unit) {
+		long convert = unit.convert(time - System.currentTimeMillis() / 1000, TimeUnit.SECONDS);
+		System.out.println("转换的时间: " + convert);
+		return convert;
+	}
+
+	@Override
+	public int compareTo(Delayed o) {
+		return Long.compare(this.time, ((MessageDelay) o).getTime());
+	}
+
+	public long getTime() {
+		return time;
+	}
+
+	@Override
+	public String toString() {
+		return "MessageDelay{" +
+				"message='" + message + '\'' +
+				", time=" + time +
+				'}';
+	}
+}
+
+
+
+public static void main(String[] args) throws InterruptedException {
+		DelayQueue<MessageDelay> delayQueue = new DelayQueue<>();
+		// 1秒后过期
+		delayQueue.put(new MessageDelay("data1", 2));
+		// 3秒后过期
+		delayQueue.put(new MessageDelay("data2", 5));
+
+		// 非阻塞读方法,时间未到则立即返回null
+		MessageDelay poll = delayQueue.poll();
+
+		// 阻塞读方法, 时间未到则一直阻塞
+		MessageDelay take = delayQueue.take();
+
+		// 其他方法与ArrayBlockingQueue类似
+		System.out.println();
+}
+```
+
+
+
+##### SynchronousQueue
+
+尽管SynchronousQueue是一个队列，但是它的主要作用在于在两个线程之间进行数据交换，区别于Exchanger的主要地方在于（站在使用的角度）SynchronousQueue所涉及的一对线程一个更加专注于数据的生产，另一个更加专注于数据的消费（各司其职），而Exchanger则更加强调一对线程数据的交换。
+
+```java
+public class SynchronousQueueTest {
+
+	public static void main(String[] args) {
+		// 定义String类型的SynchronousQueue
+		SynchronousQueue<String> queue = new SynchronousQueue<>();
+		// 启动两个线程，向queue中写入数据
+		IntStream.rangeClosed(0, 1).forEach(i ->
+				new Thread(() -> {
+					try {
+						// 若没有对应的数据消费线程，则put方法将会导致当前线程进入阻塞
+						queue.put(currentThread().getName());
+						System.out.println(currentThread() + " put element " + currentThread().getName());
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
+				}).start());
+
+		// 启动两个线程从queue中消费数据
+		IntStream.rangeClosed(0, 1).forEach(i ->
+				new Thread(() -> {
+					try {
+						// 若没有对应的数据生产线程，则take方法将会导致当前线程进入阻塞
+						String value = queue.take();
+						System.out.println(currentThread() + " take " + value);
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
+				}).start()
+		);
+	}
+}
+```
+
+
+
+##### LinkedBlockingDeque
+
+LinkedBlockingDeque是一个基于链表实现的双向（Double Ended Queue，Deque）阻塞队列，双向队列支持在队尾写入数据，读取移除数据；在队头写入数据，读取移除数据。LinkedBlockingDeque实现自BlockingDeque（BlockingDeque又是BlockingQueue的子接口），并且支持可选“边界”，与LinkedBlockingQueue一样，对边界的指定在构造LinkedBlockingDeque时就已经确定
+
+https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/LinkedBlockingDeque.html
+
+
+
+##### LinkedTransferQueue
+
+无界队列 先进先出
+
+A线程调用transfer方法将数据添加到尾部并开始阻塞直至有线程消费(poll,take)这个数据
+
+```java
+public class TransferQueueTest {
+
+	public static void main(String[] args) throws InterruptedException {
+		// 定义LinkedTransferQueue
+		LinkedTransferQueue<String> queue = new LinkedTransferQueue<>();
+
+		// 通过不同的方法在队列尾部插入三个数据元素
+		queue.add("hello");
+		queue.offer("world");
+		queue.put("Java");
+
+		// 此时该队列的数据元素为(队尾)Java->world->hello
+		new Thread(() -> {
+			try {
+				// 创建匿名线程，并且执行transfer方法
+				queue.transfer("Alex");
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+			System.out.println("current thread exit.");
+		}).start();
+		// 此刻队列的数据元素为（队尾）Alex->Java->world->hello
+		TimeUnit.SECONDS.sleep(2);
+		// 执行take方法从队列头部移除消费元素hello,但是匿名线程仍旧被阻塞
+		System.out.println(queue.take());
+		// 在队尾插入新的数据元素（队尾）Scala->Alex->Java->world
+		queue.put("Scala");
+		// 执行poll方法从队列头部移除消费元素world,匿名线程继续被阻塞
+		System.out.println(queue.poll());
+		// 执行take方法从队列头部移除消费元素Java,匿名线程继续阻塞中
+		System.out.println(queue.take());
+		// 执行take方法从队列头部移除消费元素Alex,匿名线程退出阻塞
+		System.out.println(queue.take());
+	}
+}
+
+```
+
+
+
+BlockingQueue总揽
+
+![](https://res.weread.qq.com/wrepub/epub_32436148_61)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
