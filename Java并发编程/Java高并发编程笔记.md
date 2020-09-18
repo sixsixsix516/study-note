@@ -1593,9 +1593,46 @@ BlockingQueue总揽
 
 
 
+##### ConcurrentQueue 并发队列
+
+不用关心临界值的判断, 操作该队列的线程不会被挂起并且等待被其他线程唤醒,并且是线程安全的
+
+```java
+public static void main(String[] args) {
+	// 无锁,线程安全的, 性能高效的, 基于链表结构实现的FIFO 单向队列
+	ConcurrentLinkedQueue<Integer> concurrentLinkedQueue = new ConcurrentLinkedQueue<>();
+	// 无锁,线程安全的, 性能高效的, 基于链表结构实现的FIFO 双向队列
+	ConcurrentLinkedDeque<Integer> concurrentLinkedDeque = new ConcurrentLinkedDeque<>();
+}
+```
+
+并发队列使用中需注意
+
+1. 避免使用size()方法 由于链表结构的特性, 获取元素个数时需要从头到尾遍历一遍从而影响性能
+
+   由于并发队列无锁的特点,所以在线程遍历获取size时可能由于其他线程的操作导致当前遍历得到的结果不准确
+   
+2. 存在内存泄露问题
+
+   内存泄露: 内存无法被回收
+   
+   解决方法:  使用 ConcurrentHashSet 替代
+   
+   
+
+##### ConcurrentMap 并发映射
+
+**ConcurrentHashMap**
+
+concurrentHashMap内部由多个segment(默认16个)组成, 每一个segment锁对象均可用于同步每个散列映射表的若干个桶(HashBuket) 
+
+![](https://res.weread.qq.com/wrepub/epub_32436148_66)
 
 
 
+
+
+   
 
 
 
