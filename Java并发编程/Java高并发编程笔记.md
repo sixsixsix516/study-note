@@ -1634,33 +1634,171 @@ concurrentHashMap内部由多个segment(默认16个)组成, 每一个segment锁�
 
    
 
+segment可用于减小锁的粒度, ConcurrentHashMap被分隔成若干个segment, 在put的时候只需要锁住一个segment,而get的时候不加锁,而使用volatile属性已保证被其他线程同步修改后的可见性
+
+在Java的实现中采用数组+链表+红黑树的实现方式
+
+![](https://res.weread.qq.com/wrepub/epub_32436148_67)
+
+
+
+##### ConcurrentSkipListMap 
+
+线程安全的并发访问的排序映射表,内部是SkipList(跳表), 增删改查的时间复杂度是O(log(n))
+
+优点: 
+
+- key有序
+
+- ConcurrentSkipListMap支持更高的并发，ConcurrentSkipListMap的存取时间复杂度是O（log（n）），与线程数几乎无关，也就是说，在数据量一定的情况下，并发的线程越多，ConcurrentSkipListMap越能体现出它的优势
+
+
+
+##### CopyOnWrite 写时拷贝算法
+
+简称COW, 读时不加锁, 写时加锁, 写的过程是将原来的数据拷贝一份,在拷贝的数据中进行修改,修改完后再把最新的设置回去
+
+这是一种读写分离的思想, 读和写使用的是不同的容器, 不会存在读写冲突, 这个容器常常被用于 读操作远远高于写操作并且对数据实时性不严格的场景
+
+Java5引入的两个实现类
+
+- CopyOnWriteArrayList
+- CopyOnWriteArraySet
+
+
+
+缺点:
+
+- 数据一致性问题
+- 数组复制的内存开销
+
+
+
+---
+
+### Executor包
+
+##### ThreadPoolExecutor
+
+构造方法
+
+- corePoolSize 用于指定在线程池中维护的核心线程数量,即使当前线程中的核心线程不工作, 核心线程的数量也不会减少
+- maximumPoolSize 用于设置线程池中允许的线程数量的最大值
+- keepAliveTime 当线程中的线程数量超过核心线程数并且处于空闲时, 线程池将回收一部分线程让退出系统资源,该参数可用于设置超过coreSize数量的线程在多长时间后被回收
+- TimeUnit 用于设定keepAliveTime的时间
+- workQueue 用于存放已提交至线程池但未被执行的任务
+- ThreadFactory 用于创建线程的工厂
+- RejectedExecutionHandler 当任务数量超过阻塞列边界时, 这时候线程池就会拒绝添加新的任务, 该参数设置拒绝策略
+
+```java
+ public static void main(String[] args) {
+     ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(
+             10,
+             20,
+             1, TimeUnit.MINUTES,
+             new ArrayBlockingQueue<Runnable>(10),
+             Executors.defaultThreadFactory(),
+             new ThreadPoolExecutor.DiscardPolicy()
+     );
+ }
+```
+
+线程池成功构造后, 其内部的线程并不会立即被创建, 而是首次调用执行任务的时候才会创建
+
+
+
+当线程池中的活跃（工作）线程大于等于核心线程数量并且任务队列未满时，任务队列中的任务不会立即执行，而是等待工作线程空闲时轮询任务队列以获取任务。 
+
+当任务队列已满且工作线程小于最大线程数量时，线程池会创建线程执行任务，但是线程数量不会超过最大线程数，
+
+当任务队列已满且线程池中的工作线程达到最大线程数量，并且此刻没有空闲的工作线程时，会执行任务拒绝策略，任务将以何种方式被拒绝完全取决于构造ThreadExecutorPool时指定的拒绝策略。若将执行任务的循环最大次数更改为15,再次执行时会发现只有14个任务被执行，第15个任务被丢弃（这里指定的拒绝策略为丢弃）。
+
+若线程池中的线程是空闲的且空闲时间达到指定的keepAliveTime时间，线程会被线程池回收（最多保留corePoolSize数量个线程），当然如果设置允许线程池中的核心线程超时，那么线程池中所有的工作线程都会被回收。
+
+**ThreadFactory**
+
+用于定义线程池中的线程, 可以指定线程的命名规则, 优先级, 是否为守护线程等
+
+```java
+public class MyThreadFactory implements ThreadFactory {
+
+    private final String PREFIX = "SUN";
+    private final AtomicInteger atomicInteger = new AtomicInteger();
+
+    @Override
+    public Thread newThread(Runnable r) {
+
+        ThreadGroup threadGroup = new ThreadGroup("order");
+        Thread thread = new Thread(threadGroup, r, PREFIX + atomicInteger.incrementAndGet());
+        // 线程优先级
+        thread.setPriority(10);
+        return thread;
+    }
+}
+```
 
 
 
 
 
+**拒绝策略**
+
+- `new ThreadPoolExecutor.DiscardPolicy()`  丢弃策略, 任务会被直接无视丢弃而等不到执行
+- `AbortPolicy` 中止策略  抛出运行时异常
+- `DiscardOldestPolicy` 丢弃任务队列中最老任务
+- `CallerRunsPolicy` 不丢弃任务 在当前线程阻塞的完成
 
 
 
+**关闭**
+
+1. 有序关闭（shutdown）shutdown提供了一种有序关闭ExecutorService的方式，当该方法被执行后新的任务提交将会被拒绝，但是工作线程正在执行的任务以及线程池任务（阻塞）队列中已经被提交的任务还是会执行，当所有的提交任务都完成后线程池中的工作线程才会销毁进而达到ExecutorService最终被关闭的目的。
+2. 立即关闭（shutdownNow）shutdownNow方法首先会将线程池状态修改为shutdown状态，然后将未被执行的任务挂起并从任务队列中排干，其次会尝试中断正在进行任务处理的工作线程，最后返回未被执行的任务，当然，对一个执行了shutdownNow的线程池提交新的任务同样会被拒绝。
+3. 组合关闭（shutdown&shutdownNow）通常情况下，为了确保线程池被尽可能安全地关闭，我们会采用两种关闭线程池的组合方式，以尽可能确保正在运行的任务被正常执行的同时又能提高线程池被关闭的成功率。
 
 
 
+**Executors的工厂方法**
+
+```java
+// 固定线程数量,任务队列是无边界的
+ExecutorService executorService = Executors.newFixedThreadPool(3);
+// 创建只有一个工作线程的线程池
+ExecutorService executorService1 = Executors.newSingleThreadExecutor();
+// 缓存线程池 通常用于提高执行量大, 耗时短, 异步任务程序
+ExecutorService executorService2 = Executors.newCachedThreadPool();
+// 创建调度线程
+ScheduledExecutorService scheduledExecutorService1 = Executors.newScheduledThreadPool(10);
+// 并发度等于CPU核数
+ExecutorService executorService3 = Executors.newWorkStealingPool();
+```
 
 
 
+##### Future
 
+Future代表未来的结果
 
+```java
+ public static void main(String[] args) throws ExecutionException, InterruptedException {
+     ExecutorService executorService = Executors.newSingleThreadExecutor();
+     Future<String> submit = executorService.submit(() -> {
+         try {
+             TimeUnit.SECONDS.sleep(5);
+         } catch (InterruptedException e) {
+             e.printStackTrace();
+         }
+         return "result";
+     });
+     System.out.println("todo something");
+     System.out.println("返回值: " + submit.get());
+     System.out.println("todo something2");
+ }
+```
 
+#####  Callback
 
-
-
-
-
-
-
-
-
-
+与Runnable接口非常类似, 解决Runnable接口无返回值问题
 
 
 
