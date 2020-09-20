@@ -1800,5 +1800,192 @@ Future代表未来的结果
 
 与Runnable接口非常类似, 解决Runnable接口无返回值问题
 
+运行执行错误
+
+Runnable类型的任务中,如果出现错误只能被运行它的线程捕获, 运行它的主线程很难获取到运行时出现的异常
+
+而future则是通过get方法异常方式来获取异步任务的异常
+
+
+
+##### Fork/Join Framework
+
+旨在充分利用多核CPU, 将一个复杂任务拆分(fork)成若干个并行计算, 然后将结果合并, 分而治之思想
+
+无论是RecursiveTask还是RecursiveAction，对任务的拆分与合并都是在compute方法中进行的，可见该方法的职责（fork，join，计算）太重，不够单一，且可测试性比较差，因此在Java 8版本中提供了接口Spliterator，其对任务的拆分有了进一步的高度抽象
+
+
+
+**RecurciveTask**
+
+RecursiveTask任务类型除了进行子任务的运算之外，还会将最终子任务的计算结果返回，下面通过一个简单的实例来认识一下RecursiveTask。该示例通过高并发多线程的方式计算一个数组中所有元素之和，数组会被拆分成若干分片，每一个异步任务都会计算对应分片元素之和，最后所有的子任务结果会被join在一起作为最终的结果返回。示例代码如下：
+
+```java
+
+
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.RecursiveTask;
+import java.util.stream.LongStream;
+
+/**
+ * @author sun 2020/9/20 11:09
+ */
+public class RecursiveTest extends RecursiveTask<Long> {
+
+    private final long[] numbers;
+    private final int startIndex;
+    private final int endIndex;
+
+    /**
+     * 每个子任务运算的最多元素数量
+     */
+    private static final long THRESHOLD = 10_000L;
+
+    private RecursiveTest(long[] numbers) {
+        this(numbers, 0, numbers.length);
+    }
+
+    private RecursiveTest(long[] numbers, int startIndex,
+                          int endIndex) {
+        this.numbers = numbers;
+        this.startIndex = startIndex;
+        this.endIndex = endIndex;
+    }
+
+    @Override
+    protected Long compute() {
+        int length = endIndex - startIndex;
+        // 当元素数量少于等于 THRESHOLD时，任务将不必再拆分
+        if (length <= THRESHOLD) {
+            // 直接计算
+            long result = 0L;
+            for (int i = startIndex; i < endIndex; i++) {
+                result += numbers[i];
+            }
+            return result;
+        }
+
+        // 拆分任务（一分为二，被拆分后的任务有可能还会被拆分：递归）
+        int tempEndIndex = startIndex + length / 2;
+        // 第一个子任务
+        RecursiveTest firstTask = new RecursiveTest(numbers, startIndex, tempEndIndex);
+        // 异步执行第一个被拆分的子任务（子任务有可能还会被拆，这将取决于元素数量）
+        firstTask.fork();
+        // 拆分第二个子任务
+        RecursiveTest secondTask = new RecursiveTest(numbers, tempEndIndex, endIndex);
+
+        // 异步执行第二个被拆分的子任务（子任务有可能还会被拆，这将取决于元素数量）
+        secondTask.fork();
+
+        // join等待子任务的运算结果
+        Long secondTaskResult = secondTask.join();
+        Long firstTaskResult = firstTask.join();
+
+        // 将子任务的结果相加然后返回
+        return (secondTaskResult + firstTaskResult);
+    }
+
+    public static void main(String[] args) {
+        // 创建一个数组
+        long[] numbers = LongStream.rangeClosed(1, 9_000_000).toArray();
+        // 定义RecursiveTask
+        RecursiveTest forkJoinSum = new RecursiveTest(numbers);
+
+        // 创建ForkJoinPool并提交执行RecursiveTask
+        Long sum = ForkJoinPool.commonPool().invoke(forkJoinSum);
+
+        // 输出结果
+        System.out.println(sum);
+
+        // validation result验证结果的正确性
+        assert sum == LongStream.rangeClosed(1, 9_000_000).sum();
+    }
+}
+
+```
+
+**RecurciveAction**
+
+RecursiveAction类型的任务与RecursiveTask比较类似，只不过它更关注于子任务是否运行结束，下面来看一个将数组中的每一个元素并行增加10倍（每一个数字元素都将乘10）的例子，该示例使用RecursiveAction任务的方式来实现。
+
+```java
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.RecursiveAction;
+import static java.util.concurrent.ThreadLocalRandom.current;
+
+/**
+ * @author sun 2020/9/20 11:21
+ */
+public class RecursiveActionTest extends RecursiveAction {
+
+    private List<Integer> numbers;
+    // 每个任务最多进行10个元素的计算
+    private static final int THRESHOLD = 10;
+    private int start;
+    private int end;
+    private int factor;
+
+    private RecursiveActionTest(List<Integer> numbers, int start, int end, int factor) {
+        this.numbers = numbers;
+        this.start = start;
+        this.end = end;
+        this.factor = factor;
+    }
+
+    @Override
+    protected void compute() {
+        // 直接计算
+        if (end - start < THRESHOLD) {
+            computeDirectly();
+        } else {
+            // 拆分
+            int middle = (end + start) / 2;
+            RecursiveActionTest taskOne =
+                    new RecursiveActionTest(numbers, start, middle, factor);
+            RecursiveActionTest taskTwo =
+                    new RecursiveActionTest(numbers, middle, end, factor);
+
+            invokeAll(taskOne, taskTwo);
+        }
+    }
+
+    private void computeDirectly() {
+        for (int i = start; i < end; i++) {
+            numbers.set(i, numbers.get(i) * factor);
+        }
+    }
+
+    public static void main(String[] args) {
+        // 随机生成数字并且存入list中
+        List<Integer> list = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            list.add(current().nextInt(1_000));
+        }
+        // 输出原始数据
+        System.out.println(list);
+        // 定义 ForkJoinPool
+        ForkJoinPool forkJoinPool = new ForkJoinPool();
+        // 定义RecursiveAction
+        RecursiveActionTest forkJoinTask = new RecursiveActionTest(list, 0, 10, 10);
+
+        // 将forkJoinTask提交至ForkJoinPool
+        forkJoinPool.invoke(forkJoinTask);
+        System.out.println(list);
+    }
+}
+```
+
+
+
+##### CompletionService
+
+异步任务提交和计算结果Future解耦
+
+CompletionService很好地解决了异步任务的问题，在CompletionService中提供了提交异步任务的方法（真正的异步任务执行还是由其内部的ExecutorService完成的），任务提交之后调用者不再关注Future，而是从BlockingQueue中获取已经执行完成的Future，在异步任务完成之后Future才会被插入阻塞队列，也就是说调用者从阻塞队列中获取的Future是已经完成了的异步执行任务，所以再次通过Future的get方法获取结果时，调用者所在的当前线程将不会被阻塞。
+
+本节学习了CompletionService及其实现ExecutorCompletionService，它并不是ExecutorService的一个实现或者子类，而是对ExecutorService提供了进一步的封装，使得任务的提交者不再关注追踪所返回的Future，并且通过CompletionService直接获取已经运算结束的异步任务，这种方式实现了调用者和Future之间的解耦合，在一定程度上解决了Future会使调用者线程进入阻塞的问题，尤其是通过ExecutorService提交批处理任务为如何快速使用最早结束的异步任务运算结果提供了一种新的思路和实现方式
+
 
 
