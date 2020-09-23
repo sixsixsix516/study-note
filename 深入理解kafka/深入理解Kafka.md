@@ -46,7 +46,27 @@ Kafka中的消息以主题为单位进行归类, 生产者负责将消息发送�
 
 
 
+### 主题的管理
 
+可以通过kafka提供的 kafak-topics.sh 完成主题的管理
+
+如果broker端配置参数auto.create.topics.enable设置为true（默认值就是true），那么当生产者向一个尚未创建的主题发送消息时，会自动创建一个分区数为num.partitions （默认值为1）、副本因子为default.replication.factor（默认值为1）的主题。除此之外，当一个消费者开始从未知主题中读取消息时，或者当任意一个客户端向未知主题发送元数据请求时，都会按照配置参数num.partitions和default.replication.factor的值来创建一个相应的主题。很多时候，这种自动创建主题的行为都是非预期的。除非有特殊应用需求，否则不建议将auto.create.topics.enable参数设置为true，这个参数会增加主题的管理与维护的难度。
+
+
+
+4个分区 2个副本 3个broker
+
+一共(2*4) 8个log 平分给3个broker 2 3 3 
+
+每个broker中拥有每个分区的一个副本
+
+![](img/broker副本分配.png)
+
+![](img/3节点分配.png)
+
+### 分区管理
+
+分区使用多副本机制来提升可靠性，但只有leader副本对外提供读写服务，而follower副本只负责在内部进行消息的同步
 
 
 
